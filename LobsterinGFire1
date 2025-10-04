@@ -1,0 +1,362 @@
+// Подключение к Socket.IO
+const socket = io();
+
+// Элементы DOM
+const joinModal = document.getElementById('joinModal');
+const gameContainer = document.getElementById('gameContainer');
+const playerNameInput = document.getElementById('playerName');
+const roomIdInput = document.getElementById('roomId');
+const joinBtn = document.getElementById('joinBtn');
+const shareLinkInput = document.getElementById('shareLink');
+const copyLinkBtn = document.getElementById('copyLink');
+const currentPlayerSpan = document.getElementById('currentPlayer');
+const roomIdDisplay = document.getElementById('roomIdDisplay');
+const dice1 = document.getElementById('dice1');
+const dice2 = document.getElementById('dice2');
+const rollDiceBtn = document.getElementById('rollDiceBtn');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const sendBtn = document.getElementById('sendBtn');
+const player1Div = document.getElementById('player1');
+const player2Div = document.getElementById('player2');
+
+// Состояние игры
+let gameState = null;
+let currentPlayer = null;
+let roomId = null;
+
+// Инициализация
+document.addEventListener('DOMContentLoaded', () => {
+    // Генерация случайного ID комнаты
+    if (!roomIdInput.value) {
+        roomIdInput.value = generateRoomId();
+    }
+    
+    // Обновление ссылки для совместного использования
+    updateShareLink();
+    
+    // Обработчики событий
+    setupEventListeners();
+});
+
+function generateRoomId() {
+    return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
+function updateShareLink() {
+    const roomId = roomIdInput.value || 'NEW';
+    
+    // Определяем правильный URL для совместного использования
+    let baseUrl;
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        // Если запущено локально, используем IP-адрес для внешнего доступа
+        baseUrl = `http://192.168.20.131:3000`;
+    } else {
+        // Если уже на внешнем сервере, используем текущий домен
+        baseUrl = window.location.origin;
+    }
+    
+    shareLinkInput.value = `${baseUrl}?room=${roomId}`;
+}
+
+function setupEventListeners() {
+    // Присоединение к игре
+    joinBtn.addEventListener('click', joinGame);
+    
+    // Копирование ссылки
+    copyLinkBtn.addEventListener('click', copyShareLink);
+    
+    // Обновление ссылки при изменении ID комнаты
+    roomIdInput.addEventListener('input', updateShareLink);
+    
+    // Бросок костей
+    rollDiceBtn.addEventListener('click', rollDice);
+    
+    // Отправка сообщения в чат
+    sendBtn.addEventListener('click', sendChatMessage);
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            sendChatMessage();
+        }
+    });
+    
+    // Проверка URL на наличие ID комнаты
+    checkUrlForRoomId();
+}
+
+function checkUrlForRoomId() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomFromUrl = urlParams.get('room');
+    if (roomFromUrl) {
+        roomIdInput.value = roomFromUrl;
+        updateShareLink();
+    }
+}
+
+function joinGame() {
+    const playerName = playerNameInput.value.trim();
+    const roomIdValue = roomIdInput.value.trim() || generateRoomId();
+    
+    if (!playerName) {
+        alert('Пожалуйста, введите ваше имя');
+        return;
+    }
+    
+    if (!socket.connected) {
+        alert('Нет соединения с сервером. Попробуйте перезагрузить страницу.');
+        return;
+    }
+    
+    currentPlayer = playerName;
+    roomId = roomIdValue;
+    
+    console.log('Присоединение к игре:', { roomId: roomIdValue, playerName });
+    
+    // Показать индикатор загрузки
+    joinBtn.disabled = true;
+    joinBtn.textContent = 'Подключение...';
+    
+    // Присоединение к комнате через Socket.IO
+    socket.emit('join-room', {
+        roomId: roomIdValue,
+        playerName: playerName
+    });
+    
+    // Таймаут для сброса кнопки
+    setTimeout(() => {
+        if (joinBtn.disabled) {
+            joinBtn.disabled = false;
+            joinBtn.textContent = 'Присоединиться';
+        }
+    }, 5000);
+}
+
+function copyShareLink() {
+    shareLinkInput.select();
+    shareLinkInput.setSelectionRange(0, 99999);
+    document.execCommand('copy');
+    
+    // Временная обратная связь
+    const originalText = copyLinkBtn.textContent;
+    copyLinkBtn.textContent = 'Скопировано!';
+    copyLinkBtn.style.background = '#28a745';
+    
+    setTimeout(() => {
+        copyLinkBtn.textContent = originalText;
+        copyLinkBtn.style.background = '';
+    }, 2000);
+}
+
+function rollDice() {
+    socket.emit('roll-dice');
+    
+    // Анимация костей
+    dice1.classList.add('rolling');
+    dice2.classList.add('rolling');
+    
+    setTimeout(() => {
+        dice1.classList.remove('rolling');
+        dice2.classList.remove('rolling');
+    }, 500);
+}
+
+function sendChatMessage() {
+    const message = chatInput.value.trim();
+    if (message) {
+        socket.emit('chat-message', { message: message });
+        chatInput.value = '';
+    }
+}
+
+// Socket.IO обработчики
+socket.on('connect', () => {
+    console.log('Подключен к серверу');
+    console.log('Socket ID:', socket.id);
+});
+
+socket.on('disconnect', () => {
+    console.log('Отключен от сервера');
+    showConnectionError();
+});
+
+socket.on('connect_error', (error) => {
+    console.error('Ошибка подключения:', error);
+    alert('Ошибка подключения к серверу: ' + error.message);
+});
+
+socket.on('error', (error) => {
+    console.error('Ошибка Socket.IO:', error);
+    alert('Ошибка: ' + error);
+});
+
+socket.on('game-state', (state) => {
+    console.log('Получено состояние игры:', state);
+    gameState = state;
+    updateGameDisplay();
+    
+    // Сбросить кнопку присоединения
+    if (joinBtn.disabled) {
+        joinBtn.disabled = false;
+        joinBtn.textContent = 'Присоединиться';
+    }
+});
+
+socket.on('dice-rolled', (dice) => {
+    console.log('Кости брошены:', dice);
+    dice1.textContent = dice[0];
+    dice2.textContent = dice[1];
+});
+
+function updateGameDisplay() {
+    if (!gameState) return;
+    
+    // Скрыть модальное окно и показать игру
+    joinModal.style.display = 'none';
+    gameContainer.style.display = 'grid';
+    
+    // Обновить информацию о комнате
+    roomIdDisplay.textContent = `Комната: ${gameState.roomId}`;
+    
+    // Обновить информацию об игроках
+    updatePlayersInfo();
+    
+    // Обновить состояние игры
+    updateGameStatus();
+    
+    // Обновить доску
+    updateBoard();
+    
+    // Обновить чат
+    updateChat();
+    
+    // Обновить кости
+    updateDice();
+}
+
+function updatePlayersInfo() {
+    const players = gameState.players;
+    
+    if (players.length >= 1) {
+        const player1Name = players[0].name;
+        const player1Color = players[0].color;
+        player1Div.querySelector('.player-name').textContent = player1Name;
+        player1Div.querySelector('.player-color').className = `player-color ${player1Color}`;
+    }
+    
+    if (players.length >= 2) {
+        const player2Name = players[1].name;
+        const player2Color = players[1].color;
+        player2Div.querySelector('.player-name').textContent = player2Name;
+        player2Div.querySelector('.player-color').className = `player-color ${player2Color}`;
+    }
+}
+
+function updateGameStatus() {
+    const status = gameState.gameStatus;
+    const players = gameState.players;
+    
+    if (status === 'waiting') {
+        currentPlayerSpan.textContent = 'Ожидание второго игрока...';
+        rollDiceBtn.disabled = true;
+    } else if (status === 'playing') {
+        if (players.length >= 2) {
+            const currentPlayerIndex = gameState.currentPlayer;
+            const currentPlayerName = players[currentPlayerIndex]?.name || 'Неизвестно';
+            currentPlayerSpan.textContent = `Ход игрока: ${currentPlayerName}`;
+            rollDiceBtn.disabled = false;
+        }
+    } else if (status === 'finished') {
+        currentPlayerSpan.textContent = 'Игра завершена';
+        rollDiceBtn.disabled = true;
+    }
+}
+
+function updateBoard() {
+    // Очистить все точки
+    document.querySelectorAll('.point').forEach(point => {
+        point.innerHTML = '';
+    });
+    
+    // Разместить фишки на доске
+    const board = gameState.board;
+    board.forEach((point, index) => {
+        const pointElement = document.querySelector(`[data-point="${index + 1}"]`);
+        if (pointElement) {
+            const [whiteCount, blackCount] = point;
+            
+            // Добавить белые фишки
+            for (let i = 0; i < whiteCount; i++) {
+                const checker = document.createElement('div');
+                checker.className = 'checker white';
+                pointElement.appendChild(checker);
+            }
+            
+            // Добавить черные фишки
+            for (let i = 0; i < blackCount; i++) {
+                const checker = document.createElement('div');
+                checker.className = 'checker black';
+                pointElement.appendChild(checker);
+            }
+        }
+    });
+}
+
+function updateChat() {
+    chatMessages.innerHTML = '';
+    
+    if (gameState.chatMessages.length === 0) {
+        const systemMessage = document.createElement('div');
+        systemMessage.className = 'system-message';
+        systemMessage.textContent = 'Добро пожаловать в игру! Напишите сообщение, чтобы начать общение.';
+        chatMessages.appendChild(systemMessage);
+    } else {
+        gameState.chatMessages.forEach(msg => {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'chat-message';
+            
+            const playerName = document.createElement('div');
+            playerName.className = 'player-name';
+            playerName.textContent = msg.player;
+            
+            const messageText = document.createElement('div');
+            messageText.className = 'message-text';
+            messageText.textContent = msg.message;
+            
+            messageDiv.appendChild(playerName);
+            messageDiv.appendChild(messageText);
+            chatMessages.appendChild(messageDiv);
+        });
+    }
+    
+    // Прокрутить вниз
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function updateDice() {
+    if (gameState.dice) {
+        dice1.textContent = gameState.dice[0];
+        dice2.textContent = gameState.dice[1];
+    }
+}
+
+function showConnectionError() {
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'system-message';
+    errorDiv.style.background = '#f8d7da';
+    errorDiv.style.color = '#721c24';
+    errorDiv.style.border = '1px solid #f5c6cb';
+    errorDiv.textContent = 'Потеряно соединение с сервером. Попробуйте перезагрузить страницу.';
+    
+    chatMessages.appendChild(errorDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// Обработка закрытия страницы
+window.addEventListener('beforeunload', () => {
+    socket.disconnect();
+});
+
+// Автофокус на поле имени при загрузке
+window.addEventListener('load', () => {
+    playerNameInput.focus();
+});  
